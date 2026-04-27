@@ -10,40 +10,23 @@
 * @Calebux
 
 # Frontend / Client Application
-client/ @Calebux
-client/app/ @Calebux
-client/components/ @Calebux
-client/hooks/ @Calebux
-client/lib/ @Calebux
-client/styles/ @Calebux
-client/e2e/ @Calebux
+/client/ @Calebux
 
 # Backend / API Server
-backend/ @Calebux
-backend/src/ @Calebux
-backend/services/ @Calebux
-backend/routes/ @Calebux
-backend/utils/ @Calebux
-backend/tests/ @Calebux
+/backend/ @Calebux
 
 # Smart Contracts / Blockchain
-contracts/ @Calebux
-contracts/contracts/ @Calebux
-contracts/scripts/ @Calebux
+/contracts/ @Calebux
 
 # Database / Infrastructure
-supabase/ @Calebux
-supabase/migrations/ @Calebux
-migrations/ @Calebux
-docs/RATE_LIMITING.md @Calebux
-docs/RENEWAL_EXECUTION.md @Calebux
+/supabase/ @Calebux
+/migrations/ @Calebux
 
 # SDK
-sdk/ @Calebux
-sdk/src/ @Calebux
+/sdk/ @Calebux
 
 # Build & CI/CD Configuration
-.github/ @Calebux
+/.github/ @Calebux
 *.yml @Calebux
 *.yaml @Calebux
 tsconfig.json @Calebux
@@ -54,4 +37,4 @@ package.json @Calebux
 
 # Documentation (requires root maintainer)
 *.md @Calebux
-docs/ @Calebux
+/docs/ @Calebux
