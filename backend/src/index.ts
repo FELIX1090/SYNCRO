@@ -38,6 +38,7 @@ import apiKeysRoutes from './routes/api-keys';
 import digestRoutes from './routes/digest';
 import mfaRoutes from './routes/mfa';
 import pushNotificationRoutes from './routes/push-notifications';
+import emailRescanRoutes from './routes/email-rescan';
 import gmailRouter from '../routes/integrations/gmail'
 import outlookRouter from '../routes/integrations/outlook'
 import { createExchangeRatesRouter } from './routes/exchange-rates';
@@ -119,6 +120,7 @@ app.use('/api/team', teamRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/integrations/gmail', authenticate, gmailRouter);
 app.use('/api/integrations/outlook', authenticate, outlookRouter);
+app.use('/api/integrations/email', authenticate, emailRescanRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/compliance', complianceRoutes);
 app.use('/api/tags', tagsRoutes);

@@ -672,6 +672,7 @@ GET /api/analytics/categories       # Category breakdown
 GET  /api/integrations/gmail/auth      # OAuth redirect
 POST /api/integrations/gmail/callback  # OAuth callback
 POST /api/integrations/gmail/scan      # Scan emails
+POST /api/integrations/email/rescan    # Trigger bounded email re-scan
 
 # Microsoft 365 / Outlook
 GET  /api/integrations/outlook/auth      # OAuth redirect
@@ -689,6 +690,9 @@ POST /api/integrations/calendar/sync   # Sync to calendar
 # Slack
 POST /api/integrations/slack/notify    # Send notification
 \`\`\`
+
+`POST /api/integrations/email/rescan` accepts `emailAccountId`, `startDate`, and `endDate`.
+The backend enforces ownership of the account, rejects disconnected providers, and currently limits replay windows to 31 days to keep reprocessing bounded and safe. Replay jobs are persisted in `rescan_jobs` and emit audit events for request, completion, and failure outcomes.
 
 ### API Response Format
 
