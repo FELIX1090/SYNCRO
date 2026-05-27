@@ -21,6 +21,9 @@ export * from './rate-limit'
 // Environment
 export * from './env'
 
+// CSRF
+export * from './csrf'
+
 /**
  * Helper to create a complete API route handler with all middleware
  */
@@ -30,6 +33,7 @@ import { requireAuth, requireRole, createRequestContext, type UserRole } from '.
 import { type RequestContext, type ApiResponse } from './types'
 import { isMaintenanceMode } from './env'
 import { ApiErrors } from './errors'
+import { validateCsrfToken } from './csrf'
 
 type RouteHandler = (
   request: NextRequest,
@@ -42,6 +46,7 @@ type RouteOptions = {
   requireRole?: UserRole[]
   rateLimit?: (request: NextRequest) => void
   skipMaintenanceCheck?: boolean
+  skipCsrf?: boolean
 }
 
 export function createApiRoute(
@@ -51,6 +56,12 @@ export function createApiRoute(
   return withErrorHandling(async (request: NextRequest) => {
     if (!options.skipMaintenanceCheck && isMaintenanceMode()) {
       throw ApiErrors.serviceUnavailable('Service is currently under maintenance')
+    }
+
+    // CSRF protection for all mutating requests (POST, PUT, PATCH, DELETE)
+    const isMutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)
+    if (isMutating && !options.skipCsrf) {
+      validateCsrfToken(request)
     }
 
     if (options.rateLimit) {

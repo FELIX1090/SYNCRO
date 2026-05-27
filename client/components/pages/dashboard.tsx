@@ -42,6 +42,7 @@ interface DashboardPageProps {
   exchangeRates?: Record<string, number>
   ratesStale?: boolean
   isLoading?: boolean
+  onRestartTour?: () => void
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ export default function DashboardPage({
   exchangeRates,
   ratesStale,
   isLoading = false,
+  onRestartTour,
 }: DashboardPageProps) {
   const dc = displayCurrency ?? "USD"
   const rates = exchangeRates ?? {}
@@ -210,6 +212,21 @@ export default function DashboardPage({
                 </option>
               ))}
             </select>
+          )}
+
+          {onRestartTour && (
+            <button
+              onClick={onRestartTour}
+              aria-label="Restart Onboarding Tour"
+              className={`px-3 py-2 border rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                darkMode
+                  ? "bg-[#2D3748] border-gray-700 text-gray-300 hover:text-white"
+                  : "bg-white border-gray-300 text-gray-700 hover:text-gray-900"
+              }`}
+              title="Restart Onboarding Tour"
+            >
+              <span>Tour</span>
+            </button>
           )}
         </div>
       </div>
