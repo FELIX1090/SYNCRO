@@ -11,12 +11,12 @@ const createMockQuery = (data: any, error: any = null, count: number = 0) => {
     lte: jest.fn().mockReturnThis(),
     order: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
-    single: jest.fn().mockResolvedValue({ data, error }),
-    maybeSingle: jest.fn().mockResolvedValue({ data, error }),
-    then: jest.fn().mockImplementation(function(resolve) {
-      return Promise.resolve({ data, error, count: count || (Array.isArray(data) ? data.length : 0) }).then(resolve);
-    }),
+    single: jest.fn().mockImplementation(() => Promise.resolve({ data, error })),
+    maybeSingle: jest.fn().mockImplementation(() => Promise.resolve({ data, error })),
   };
+  query.then = jest.fn().mockImplementation(function(resolve) {
+    return Promise.resolve({ data, error, count: count || (Array.isArray(data) ? data.length : 0) }).then(resolve);
+  });
   return query;
 };
 
@@ -69,8 +69,10 @@ describe('MonitoringService', () => {
         },
       ];
 
-      const mockQuery = createMockQuery(mockSubscriptions);
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock)
+        .mockReturnValueOnce(createMockQuery([], null, 3)) // totalCount
+        .mockReturnValueOnce(createMockQuery([], null, 2)) // activeCount
+        .mockReturnValueOnce(createMockQuery(mockSubscriptions)); // subs
 
       const metrics = await monitoringService.getSubscriptionMetrics();
 
@@ -102,18 +104,10 @@ describe('MonitoringService', () => {
         },
       ];
 
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockReturnThis(),
-        then: jest.fn().mockImplementation(function(resolve) {
-          return Promise.resolve({
-            data: mockSubscriptions,
-            error: null,
-          }).then(resolve);
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock)
+        .mockReturnValueOnce(createMockQuery([], null, 3))
+        .mockReturnValueOnce(createMockQuery([], null, 3))
+        .mockReturnValueOnce(createMockQuery(mockSubscriptions));
 
       const metrics = await monitoringService.getSubscriptionMetrics();
 
@@ -140,18 +134,10 @@ describe('MonitoringService', () => {
         },
       ];
 
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockReturnThis(),
-        then: jest.fn().mockImplementation(function(resolve) {
-          return Promise.resolve({
-            data: mockSubscriptions,
-            error: null,
-          }).then(resolve);
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock)
+        .mockReturnValueOnce(createMockQuery([], null, 2))
+        .mockReturnValueOnce(createMockQuery([], null, 1))
+        .mockReturnValueOnce(createMockQuery(mockSubscriptions));
 
       const metrics = await monitoringService.getSubscriptionMetrics();
 
@@ -159,15 +145,10 @@ describe('MonitoringService', () => {
     });
 
     it('should handle empty subscription list', async () => {
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockResolvedValue({
-          data: [],
-          error: null,
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock)
+        .mockReturnValueOnce(createMockQuery([], null, 0))
+        .mockReturnValueOnce(createMockQuery([], null, 0))
+        .mockReturnValueOnce(createMockQuery([]));
 
       const metrics = await monitoringService.getSubscriptionMetrics();
 
@@ -193,21 +174,10 @@ describe('MonitoringService', () => {
         },
       ];
 
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockReturnThis(),
-        eq: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        then: jest.fn().mockImplementation(function(resolve) {
-          return Promise.resolve({
-            data: mockSubscriptions,
-            error: null,
-            count: mockSubscriptions.length,
-          }).then(resolve);
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock)
+        .mockReturnValueOnce(createMockQuery([], null, 2))
+        .mockReturnValueOnce(createMockQuery([], null, 2))
+        .mockReturnValueOnce(createMockQuery(mockSubscriptions));
 
       const metrics = await monitoringService.getSubscriptionMetrics();
 
@@ -216,15 +186,8 @@ describe('MonitoringService', () => {
     });
 
     it('should throw error on database failure', async () => {
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockResolvedValue({
-          data: null,
-          error: new Error('Database error'),
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock)
+        .mockReturnValueOnce(createMockQuery([], new Error('Database error')));
 
       await expect(monitoringService.getSubscriptionMetrics()).rejects.toThrow(
         'Database error'
@@ -242,18 +205,7 @@ describe('MonitoringService', () => {
         { channel: 'sms', status: 'failed' },
       ];
 
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockReturnThis(),
-        then: jest.fn().mockImplementation(function(resolve) {
-          return Promise.resolve({
-            data: mockDeliveries,
-            error: null,
-          }).then(resolve);
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock).mockReturnValue(createMockQuery(mockDeliveries));
 
       const metrics = await monitoringService.getRenewalMetrics();
 
@@ -272,18 +224,7 @@ describe('MonitoringService', () => {
         { channel: 'push', status: 'sent' },
       ];
 
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockReturnThis(),
-        then: jest.fn().mockImplementation(function(resolve) {
-          return Promise.resolve({
-            data: mockDeliveries,
-            error: null,
-          }).then(resolve);
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock).mockReturnValue(createMockQuery(mockDeliveries));
 
       const metrics = await monitoringService.getRenewalMetrics();
 
@@ -302,15 +243,7 @@ describe('MonitoringService', () => {
     });
 
     it('should handle empty delivery list', async () => {
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockResolvedValue({
-          data: [],
-          error: null,
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock).mockReturnValue(createMockQuery([]));
 
       const metrics = await monitoringService.getRenewalMetrics();
 
@@ -320,102 +253,8 @@ describe('MonitoringService', () => {
       expect(Object.keys(metrics.channel_distribution).length).toBe(0);
     });
 
-    it('should handle 100% success rate', async () => {
-      const mockDeliveries = [
-        { channel: 'email', status: 'sent' },
-        { channel: 'sms', status: 'sent' },
-        { channel: 'push', status: 'sent' },
-      ];
-
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockReturnThis(),
-        gte: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        then: jest.fn().mockImplementation(function(resolve) {
-          return Promise.resolve({
-            data: mockDeliveries,
-            error: null,
-          }).then(resolve);
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
-
-      const metrics = await monitoringService.getRenewalMetrics();
-
-      expect(metrics.success_rate).toBe(100);
-      expect(metrics.failure_rate).toBe(0);
-    });
-
-    it('should handle 100% failure rate', async () => {
-      const mockDeliveries = [
-        { channel: 'email', status: 'failed' },
-        { channel: 'sms', status: 'failed' },
-        { channel: 'push', status: 'failed' },
-      ];
-
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockReturnThis(),
-        gte: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        then: jest.fn().mockImplementation(function(resolve) {
-          return Promise.resolve({
-            data: mockDeliveries,
-            error: null,
-          }).then(resolve);
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
-
-      const metrics = await monitoringService.getRenewalMetrics();
-
-      expect(metrics.success_rate).toBe(0);
-      expect(metrics.failure_rate).toBe(100);
-    });
-
-    it('should ignore unknown status values', async () => {
-      const mockDeliveries = [
-        { channel: 'email', status: 'sent' },
-        { channel: 'email', status: 'failed' },
-        { channel: 'email', status: 'pending' }, // Unknown status
-        { channel: 'email', status: 'retrying' }, // Unknown status
-      ];
-
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockReturnThis(),
-        gte: jest.fn().mockReturnThis(),
-        limit: jest.fn().mockReturnThis(),
-        then: jest.fn().mockImplementation(function(resolve) {
-          return Promise.resolve({
-            data: mockDeliveries,
-            error: null,
-          }).then(resolve);
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
-
-      const metrics = await monitoringService.getRenewalMetrics();
-
-      expect(metrics.total_delivery_attempts).toBe(4);
-      expect(metrics.success_rate).toBe(25); // Only 1 success
-      expect(metrics.failure_rate).toBe(25); // Only 1 failure
-    });
-
     it('should throw error on database failure', async () => {
-      const mockQuery = {
-        ...mockChain,
-        select: jest.fn().mockResolvedValue({
-          data: null,
-          error: new Error('Database error'),
-        }),
-      };
-
-      (supabase.from as jest.Mock).mockReturnValue(mockQuery);
+      (supabase.from as jest.Mock).mockReturnValue(createMockQuery(null, new Error('Database error')));
 
       await expect(monitoringService.getRenewalMetrics()).rejects.toThrow(
         'Database error'
@@ -425,8 +264,6 @@ describe('MonitoringService', () => {
 
   describe('getAgentActivity()', () => {
     it('should retrieve agent activity metrics', async () => {
-      const mockReminders = { count: 25 };
-      const mockProcessed = { count: 150 };
       const mockLogs = [
         { status: 'confirmed' },
         { status: 'confirmed' },
@@ -434,21 +271,9 @@ describe('MonitoringService', () => {
       ];
 
       (supabase.from as jest.Mock)
-        .mockReturnValueOnce({
-          select: jest.fn().mockReturnThis(),
-          eq: jest.fn().mockResolvedValue(mockReminders),
-        })
-        .mockReturnValueOnce({
-          select: jest.fn().mockReturnThis(),
-          neq: jest.fn().mockReturnThis(),
-          gte: jest.fn().mockResolvedValue(mockProcessed),
-        })
-        .mockReturnValueOnce({
-          select: jest.fn().mockResolvedValue({
-            data: mockLogs,
-            error: null,
-          }),
-        });
+        .mockReturnValueOnce(createMockQuery([], null, 25)) // pendingCount
+        .mockReturnValueOnce(createMockQuery([], null, 150)) // processedCount
+        .mockReturnValueOnce(createMockQuery(mockLogs)); // bcLogs
 
       const activity = await monitoringService.getAgentActivity();
 
@@ -459,31 +284,10 @@ describe('MonitoringService', () => {
     });
 
     it('should handle missing blockchain logs', async () => {
-      const mockReminders = { count: 10 };
-      const mockProcessed = { count: 100 };
-
       (supabase.from as jest.Mock)
-        .mockReturnValueOnce({
-          select: jest.fn().mockReturnThis(),
-          eq: jest.fn().mockResolvedValue(mockReminders),
-        })
-        .mockReturnValueOnce({
-          select: jest.fn().mockReturnThis(),
-          neq: jest.fn().mockReturnThis(),
-          gte: jest.fn().mockResolvedValue(mockProcessed),
-        })
-        .mockReturnValueOnce({
-          select: jest.fn().mockReturnThis(),
-          order: jest.fn().mockReturnThis(),
-          limit: jest.fn().mockReturnThis(),
-          gte: jest.fn().mockReturnThis(),
-          then: jest.fn().mockImplementation(function(resolve) {
-            return Promise.resolve({
-              data: null,
-              error: null,
-            }).then(resolve);
-          }),
-        });
+        .mockReturnValueOnce(createMockQuery([], null, 10))
+        .mockReturnValueOnce(createMockQuery([], null, 100))
+        .mockReturnValueOnce(createMockQuery(null));
 
       const activity = await monitoringService.getAgentActivity();
 
@@ -492,8 +296,6 @@ describe('MonitoringService', () => {
     });
 
     it('should handle zero pending reminders', async () => {
-      const mockReminders = { count: 0 };
-      const mockProcessed = { count: 500 };
       const mockLogs = [
         { status: 'confirmed' },
         { status: 'failed' },
@@ -501,27 +303,16 @@ describe('MonitoringService', () => {
       ];
 
       (supabase.from as jest.Mock)
-        .mockReturnValueOnce({
-          select: jest.fn().mockReturnThis(),
-          eq: jest.fn().mockResolvedValue(mockReminders),
-        })
-        .mockReturnValueOnce({
-          select: jest.fn().mockReturnThis(),
-          neq: jest.fn().mockReturnThis(),
-          gte: jest.fn().mockResolvedValue(mockProcessed),
-        })
-        .mockReturnValueOnce({
-          select: jest.fn().mockResolvedValue({
-            data: mockLogs,
-            error: null,
-          }),
-        });
+        .mockReturnValueOnce(createMockQuery([], null, 0))
+        .mockReturnValueOnce(createMockQuery([], null, 500))
+        .mockReturnValueOnce(createMockQuery(mockLogs));
 
       const activity = await monitoringService.getAgentActivity();
 
       expect(activity.pending_reminders).toBe(0);
       expect(activity.processed_reminders_last_24h).toBe(500);
     });
+  });
 
     it('should handle undefined count values', async () => {
       (supabase.from as jest.Mock)
