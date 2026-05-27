@@ -287,6 +287,8 @@ Additional dependencies to be added:
 - See `/client/BACKEND_DOCUMENTATION.md` for detailed API specifications
 - See `/client/New_Backend_Api_documentation.md` for API endpoint details
 - See `/backend/docs/RATE_LIMITING.md` for comprehensive rate limiting documentation
+- See `/backend/docs/PERFORMANCE_INDEXES_IMPLEMENTATION.md` for performance indexes documentation (Issue #659)
+- See `/backend/docs/PERFORMANCE_INDEXES_QUERY_PLANS.md` for query plans and benchmarking
 - See main `/README.md` for project overview
 
 ## Notes
