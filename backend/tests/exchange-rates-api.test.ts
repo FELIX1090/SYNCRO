@@ -27,6 +27,7 @@ describe('GET /api/exchange-rates', () => {
         rates: { EUR: 0.92, GBP: 0.79 },
         cachedAt: '2026-03-28T12:00:00Z',
         stale: false,
+        source: 'live',
       }),
     } as unknown as ExchangeRateService;
 
@@ -47,6 +48,7 @@ describe('GET /api/exchange-rates', () => {
     expect(res.body.data.base).toBe('USD');
     expect(res.body.data.rates.EUR).toBe(0.92);
     expect(res.body.data.stale).toBe(false);
+    expect(res.body.data.source).toBe('live');
   });
 
   it('defaults to USD when no base provided', async () => {
