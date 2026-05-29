@@ -46,6 +46,7 @@ import slackRouter from '../routes/integrations/slack'
 import { createExchangeRatesRouter } from './routes/exchange-rates';
 import { ExchangeRateService } from './services/exchange-rate/exchange-rate-service';
 import { FiatRateProvider } from './services/exchange-rate/fiat-provider';
+import { FrankfurterProvider } from './services/exchange-rate/frankfurter-provider';
 import { CryptoRateProvider } from './services/exchange-rate/crypto-provider';
 import { monitoringService } from './services/monitoring-service';
 import type { FailedItemsResult } from './services/monitoring-service';
@@ -76,8 +77,16 @@ if (!ADMIN_API_KEY && process.env.NODE_ENV === 'production') {
 }
 
 // Exchange Rate Service Setup
+// Provider fallback order:
+//   1. FiatRateProvider    — ExchangeRate-API (primary fiat source)
+//   2. FrankfurterProvider — Frankfurter/ECB  (secondary fiat fallback)
+//   3. CryptoRateProvider  — CoinGecko        (crypto: XLM, USDC)
+// If a provider fails, the service continues with the remaining providers.
+// If all providers fail, stale cache is used; if no cache exists, static
+// hardcoded rates are returned and the response is marked stale.
 const exchangeRateService = new ExchangeRateService([
   new FiatRateProvider(),
+  new FrankfurterProvider(),
   new CryptoRateProvider(),
 ]);
 
