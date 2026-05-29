@@ -133,6 +133,33 @@ const options: swaggerJSDoc.Options = {
             includeYearToDate: { type: 'boolean' },
           },
         },
+        MonthlySpend: {
+          type: 'object',
+          properties: {
+            month: { type: 'string', example: '2026-05', description: 'YYYY-MM' },
+            total_spend: { type: 'number', example: 89.97 },
+            count: { type: 'integer', example: 5 },
+          },
+        },
+        CategorySpend: {
+          type: 'object',
+          properties: {
+            category: { type: 'string', example: 'Entertainment' },
+            total_spend: { type: 'number', example: 45.98 },
+            percentage: { type: 'number', example: 51.1 },
+            count: { type: 'integer', example: 3 },
+          },
+        },
+        SubscriptionSpend: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            name: { type: 'string', example: 'Netflix' },
+            price: { type: 'number', example: 15.99 },
+            billing_cycle: { type: 'string', example: 'monthly' },
+            monthly_normalized_price: { type: 'number', example: 15.99 },
+          },
+        },
       },
     },
   },
