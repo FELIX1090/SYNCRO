@@ -4,6 +4,8 @@
 
 SYNCRO uses the [Supabase CLI](https://supabase.com/docs/guides/cli) to manage database migrations.
 All migration files live in `supabase/migrations/` and are applied in lexicographic order.
+`supabase/migrations/` is the canonical migration source of truth for this repository.
+Legacy SQL snapshots under `backend/migrations/` and `backend/scripts/` are kept for reference only.
 
 ### Prerequisites
 
@@ -90,12 +92,15 @@ Every pull request that touches `supabase/migrations/` triggers the
 2. Applies all migrations from scratch (`supabase db push`)
 3. Runs `supabase db lint` to catch SQL issues
 
+Changes under `backend/migrations/` and `backend/scripts/` are not part of the canonical migration validation path.
+
 A PR cannot be merged if this workflow fails.
 
 ### Seed data
 
 `supabase/seed.sql` contains fake data for local development only.
 It is applied automatically by `supabase db reset`.
+Use the same seed file for local development and E2E bootstrap runs.
 
 **Never add real emails, payment data, or any PII to seed.sql.**
 Thank you for your interest in contributing! This guide will help you set up the project, follow conventions, and submit high-quality contributions.
@@ -180,9 +185,12 @@ If you encounter any issues with the branch protection or have questions about t
 - Help newer contributors learn and improve
 - Report any code of conduct violations to the maintainers
 ## Additional Resources
-- [PR Submission Guide](./PR_SUBMISSION_GUIDE.md)
+- [PR Submission Guide](./docs/archive/PR_SUBMISSION_GUIDE.md)
 - [Backend README](./backend/README.md)
 - [Client README](./client/README.md)
 - [GitHub Docs on Branch Protection](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
 ---
 Thank you for helping make Synchro better! 🚀
+
+## Issue Delivery Notes
+When completing an issue, any long-form implementation artifacts, summaries, or delivery notes must be stored in the `docs/archive/` directory rather than the repository root. This keeps the root directory clean and ensures that active project entrypoints are easy to find.

@@ -166,7 +166,6 @@ All tables are defined with Row Level Security (RLS) policies:
 \`\`\`bash
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 \`\`\`
 
 #### 1.2 Execute Database Migrations
@@ -380,9 +379,11 @@ MICROSOFT_REDIRECT_URI=https://yourdomain.com/api/integrations/outlook/auth
 ### Priority 3: Nice to Have (Enhancement)
 
 #### 3.1 Calendar Integration
-**Task**: Sync renewals to Google Calendar
+**Status**: ✅ Implemented (iCal feed export)
 
-**See**: `INTEGRATIONS.md` for implementation guide
+**Task**: Export renewals and reminder schedules to calendar apps via iCal feed
+
+**See**: `../backend/CALENDAR_INTEGRATION_GUIDE.md` for route, service, and UI behavior
 
 #### 3.2 Slack Notifications
 **Task**: Send team notifications to Slack
@@ -672,6 +673,7 @@ GET /api/analytics/categories       # Category breakdown
 GET  /api/integrations/gmail/auth      # OAuth redirect
 POST /api/integrations/gmail/callback  # OAuth callback
 POST /api/integrations/gmail/scan      # Scan emails
+POST /api/integrations/email/rescan    # Trigger bounded email re-scan
 
 # Microsoft 365 / Outlook
 GET  /api/integrations/outlook/auth      # OAuth redirect
@@ -683,12 +685,18 @@ POST /api/integrations/stripe/checkout # Create checkout
 POST /api/integrations/stripe/webhook  # Webhook handler
 GET  /api/integrations/stripe/portal   # Customer portal
 
-# Calendar
-POST /api/integrations/calendar/sync   # Sync to calendar
+# Calendar (iCal feed)
+GET  /api/calendar/feed/:userId/:token.ics  # Public iCal feed (token-gated)
+GET  /api/calendar/token                     # Authenticated feed token
+GET  /api/calendar/preferences               # Calendar sync preferences
+PATCH /api/calendar/preferences              # Update calendar sync preferences
 
 # Slack
 POST /api/integrations/slack/notify    # Send notification
 \`\`\`
+
+`POST /api/integrations/email/rescan` accepts `emailAccountId`, `startDate`, and `endDate`.
+The backend enforces ownership of the account, rejects disconnected providers, and currently limits replay windows to 31 days to keep reprocessing bounded and safe. Replay jobs are persisted in `rescan_jobs` and emit audit events for request, completion, and failure outcomes.
 
 ### API Response Format
 
@@ -1103,10 +1111,12 @@ NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 \`\`\`
 
-### 4. Google Calendar (Renewal Sync)
-**Status**: ❌ Not implemented
-**Priority**: Low
-**See**: `INTEGRATIONS.md` Section 6
+### 4. Calendar Sync (iCal Feed Export)
+**Status**: ✅ Implemented
+**Priority**: P1
+**See**: `../backend/CALENDAR_INTEGRATION_GUIDE.md`
+
+Provides a token-gated iCal feed for subscription renewals and reminder schedules. Google Calendar OAuth push sync remains a future enhancement in `INTEGRATIONS.md` Section 6.
 
 ### 5. Slack (Team Notifications)
 **Status**: ❌ Not implemented
@@ -1174,7 +1184,6 @@ STRIPE_WEBHOOK_SECRET=whsec_...
    # Supabase
    NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJxxx...
-   SUPABASE_SERVICE_ROLE_KEY=eyJxxx...
    
    # Stripe (if using payments)
    STRIPE_SECRET_KEY=sk_live_xxx
@@ -1244,7 +1253,6 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 # Required
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
 
 # Stripe (if using payments)
 STRIPE_SECRET_KEY=

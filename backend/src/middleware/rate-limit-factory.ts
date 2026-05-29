@@ -202,12 +202,16 @@ export class RateLimiterFactory {
   }
 
   /**
-   * Get Redis store status for health monitoring
+   * Get Redis store status for health monitoring.
+   * When `degraded` is true the app is running with the in-memory fallback
+   * because Redis was configured but is currently unreachable.
    */
-  static getStoreStatus(): { type: 'redis' | 'memory'; available: boolean } {
+  static getStoreStatus(): { type: 'redis' | 'memory'; available: boolean; degraded: boolean } {
+    const degraded = this.redisStoreInitialized && !this.redisStore;
     return {
       type: this.redisStore ? 'redis' : 'memory',
       available: this.redisStoreInitialized,
+      degraded,
     };
   }
 }

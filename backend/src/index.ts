@@ -5,6 +5,7 @@ import * as Sentry from '@sentry/node';
 import { nodeProfilingIntegration } from '@sentry/profiling-node';
 import swaggerUi from 'swagger-ui-express';
 import * as bip39 from 'bip39';
+import { resolveRelease, resolveEnvironment, scrubEvent, SENTRY_TAG_KEYS } from '../../shared/src/sentry';
 
 // Load environment variables before importing other modules
 dotenv.config();
@@ -12,10 +13,15 @@ dotenv.config();
 // Sentry Initialization
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
-  environment: process.env.NODE_ENV || 'development',
+  release: resolveRelease(),
+  environment: resolveEnvironment(),
   integrations: [nodeProfilingIntegration()],
-  tracesSampleRate: 0.1,
+  tracesSampleRate: process.env.NODE_ENV === 'production' ? 0.1 : 1.0,
   profilesSampleRate: 0.1,
+  initialScope: {
+    tags: { [SENTRY_TAG_KEYS.service]: 'backend' },
+  },
+  beforeSend: scrubEvent,
 });
 
 import logger from './config/logger';
@@ -38,13 +44,18 @@ import apiKeysRoutes from './routes/api-keys';
 import digestRoutes from './routes/digest';
 import mfaRoutes from './routes/mfa';
 import pushNotificationRoutes from './routes/push-notifications';
+import walletRoutes from './routes/wallet';
+import emailRescanRoutes from './routes/email-rescan';
 import gmailRouter from '../routes/integrations/gmail'
 import outlookRouter from '../routes/integrations/outlook'
+import slackRouter from '../routes/integrations/slack'
 import { createExchangeRatesRouter } from './routes/exchange-rates';
 import { ExchangeRateService } from './services/exchange-rate/exchange-rate-service';
 import { FiatRateProvider } from './services/exchange-rate/fiat-provider';
+import { FrankfurterProvider } from './services/exchange-rate/frankfurter-provider';
 import { CryptoRateProvider } from './services/exchange-rate/crypto-provider';
 import { monitoringService } from './services/monitoring-service';
+import type { FailedItemsResult } from './services/monitoring-service';
 import { healthService } from './services/health-service';
 import { eventListener } from './services/event-listener';
 import { expiryService } from './services/expiry-service';
@@ -53,6 +64,12 @@ import { adminAuth } from './middleware/admin';
 import { createAdminLimiter, RateLimiterFactory } from './middleware/rate-limit-factory';
 import { scheduleAutoResume } from './jobs/auto-resume';
 import giftCardLedgerRoutes from './routes/gift-card-ledger';
+import notificationDeadLetterRoutes from './routes/notification-dead-letter';
+import telegramWebhookRoutes from './routes/telegram-webhook';
+import { telegramCommandService } from './services/telegram-command-service';
+import calendarRouter from './routes/calendar';
+import userPreferencesRoutes from './routes/user-preferences';
+import reminderSettingsRoutes from './routes/reminder-settings';
 import { errorHandler } from './middleware/errorHandler';
 import { swaggerSpec } from './swagger';
 
@@ -66,8 +83,16 @@ if (!ADMIN_API_KEY && process.env.NODE_ENV === 'production') {
 }
 
 // Exchange Rate Service Setup
+// Provider fallback order:
+//   1. FiatRateProvider    — ExchangeRate-API (primary fiat source)
+//   2. FrankfurterProvider — Frankfurter/ECB  (secondary fiat fallback)
+//   3. CryptoRateProvider  — CoinGecko        (crypto: XLM, USDC)
+// If a provider fails, the service continues with the remaining providers.
+// If all providers fail, stale cache is used; if no cache exists, static
+// hardcoded rates are returned and the response is marked stale.
 const exchangeRateService = new ExchangeRateService([
   new FiatRateProvider(),
+  new FrankfurterProvider(),
   new CryptoRateProvider(),
 ]);
 
@@ -119,6 +144,8 @@ app.use('/api/team', teamRoutes);
 app.use('/api/audit', auditRoutes);
 app.use('/api/integrations/gmail', authenticate, gmailRouter);
 app.use('/api/integrations/outlook', authenticate, outlookRouter);
+app.use('/api/integrations/slack', authenticate, slackRouter);
+app.use('/api/integrations/email', authenticate, emailRescanRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/compliance', complianceRoutes);
 app.use('/api/tags', tagsRoutes);
@@ -126,8 +153,14 @@ app.use('/api/user', userRoutes);
 app.use('/api/digest', digestRoutes);
 app.use('/api/mfa', mfaRoutes);
 app.use('/api/notifications/push', pushNotificationRoutes);
+app.use('/api/wallet', walletRoutes);
+app.use('/api/notifications/dead-letter', notificationDeadLetterRoutes);
 app.use('/api/exchange-rates', createExchangeRatesRouter(exchangeRateService));
 app.use('/api/gift-card-ledger', giftCardLedgerRoutes);
+app.use('/api/telegram', telegramWebhookRoutes);
+app.use('/api/calendar', calendarRouter);
+app.use('/api/user-preferences', authenticate, userPreferencesRoutes);
+app.use('/api/reminder-settings', authenticate, reminderSettingsRoutes);
 
 app.get('/api/reminders/status', (req, res) => {
   const status = schedulerService.getStatus();
@@ -159,6 +192,110 @@ app.get('/api/admin/metrics/activity', createAdminLimiter(), adminAuth, async (r
     res.json(metrics);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch agent activity' });
+  }
+});
+
+// ── Issue #99: Async ops dashboard metrics ───────────────────────────────────
+
+app.get('/api/admin/metrics/throughput', createAdminLimiter(), adminAuth, async (req, res) => {
+  try {
+    const w = req.query.window as string;
+    const windowHours = w ? parseInt(w, 10) : 24;
+    if (isNaN(windowHours) || windowHours < 1 || windowHours > 720) {
+      return res.status(400).json({ error: 'window must be between 1 and 720 hours' });
+    }
+    const metrics = await monitoringService.getThroughputMetrics(windowHours);
+    res.json(metrics);
+  } catch (error) {
+    logger.error('Error fetching throughput metrics:', error);
+    res.status(500).json({ error: 'Failed to fetch throughput metrics' });
+  }
+});
+
+app.get('/api/admin/metrics/latency', createAdminLimiter(), adminAuth, async (req, res) => {
+  try {
+    const w = req.query.window as string;
+    const windowHours = w ? parseInt(w, 10) : 24;
+    if (isNaN(windowHours) || windowHours < 1 || windowHours > 720) {
+      return res.status(400).json({ error: 'window must be between 1 and 720 hours' });
+    }
+    const metrics = await monitoringService.getLatencyMetrics(windowHours);
+    res.json(metrics);
+  } catch (error) {
+    logger.error('Error fetching latency metrics:', error);
+    res.status(500).json({ error: 'Failed to fetch latency metrics' });
+  }
+});
+
+app.get('/api/admin/metrics/retries', createAdminLimiter(), adminAuth, async (req, res) => {
+  try {
+    const w = req.query.window as string;
+    const windowHours = w ? parseInt(w, 10) : 24;
+    if (isNaN(windowHours) || windowHours < 1 || windowHours > 720) {
+      return res.status(400).json({ error: 'window must be between 1 and 720 hours' });
+    }
+    const metrics = await monitoringService.getRetryMetrics(windowHours);
+    res.json(metrics);
+  } catch (error) {
+    logger.error('Error fetching retry metrics:', error);
+    res.status(500).json({ error: 'Failed to fetch retry metrics' });
+  }
+});
+
+app.get('/api/admin/metrics/failed-items', createAdminLimiter(), adminAuth, async (req, res) => {
+  try {
+    const type = req.query.type as string;
+    if (!type || !['reminder', 'renewal', 'blockchain'].includes(type)) {
+      return res.status(400).json({
+        error: 'type is required and must be one of: reminder, renewal, blockchain',
+      });
+    }
+    const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
+    const result: FailedItemsResult = await monitoringService.getFailedItems(
+      type as 'reminder' | 'renewal' | 'blockchain',
+      limit,
+      offset,
+    );
+    res.json(result);
+  } catch (error) {
+    logger.error('Error fetching failed items:', error);
+    res.status(500).json({ error: 'Failed to fetch failed items' });
+  }
+});
+
+app.get('/api/admin/metrics/ops-summary', createAdminLimiter(), adminAuth, async (req, res) => {
+  try {
+    const w = req.query.window as string;
+    const windowHours = w ? parseInt(w, 10) : 24;
+    if (isNaN(windowHours) || windowHours < 1 || windowHours > 720) {
+      return res.status(400).json({ error: 'window must be between 1 and 720 hours' });
+    }
+    const [subscriptions, renewals, activity, trials, throughput, latency, retries] =
+      await Promise.all([
+        monitoringService.getSubscriptionMetrics(),
+        monitoringService.getRenewalMetrics(),
+        monitoringService.getAgentActivity(),
+        monitoringService.getTrialMetrics(),
+        monitoringService.getThroughputMetrics(windowHours),
+        monitoringService.getLatencyMetrics(windowHours),
+        monitoringService.getRetryMetrics(windowHours),
+      ]);
+    res.json({
+      generated_at: new Date().toISOString(),
+      window_hours: windowHours,
+      subscriptions,
+      renewals,
+      activity,
+      trials,
+      throughput,
+      latency,
+      retries,
+      db_pool: monitoringService.getPoolMetrics(),
+    });
+  } catch (error) {
+    logger.error('Error fetching ops summary:', error);
+    res.status(500).json({ error: 'Failed to fetch ops summary' });
   }
 });
 
@@ -274,12 +411,18 @@ const server = app.listen(PORT, async () => {
   }
 
   scheduleAutoResume();
+
+  telegramCommandService.init();
+  if (process.env.TELEGRAM_BOT_TOKEN && !process.env.TELEGRAM_WEBHOOK_SECRET) {
+    logger.warn('[Telegram] TELEGRAM_WEBHOOK_SECRET not set — webhook origin is unverified');
+  }
 });
 
 // Graceful shutdown
 const shutdown = () => {
   logger.info('Shutting down gracefully');
   schedulerService.stop();
+  telegramCommandService.stop();
   eventListener.stop();
   server.close(() => {
     logger.info('Server closed');

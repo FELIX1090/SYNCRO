@@ -1,5 +1,5 @@
 /**
- * @synchro/shared
+ * @syncro/shared
  * 
  * Shared domain models and types for Synchro application
  * Prevents type drift between client, backend, and SDK
@@ -25,3 +25,9 @@ export * from './analytics';
 
 // Common utilities
 export * from './common';
+
+// RPC Client
+export * from './rpc-client';
+
+// Sentry shared config
+export * from './sentry';
