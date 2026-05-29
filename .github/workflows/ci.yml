@@ -109,6 +109,27 @@ jobs:
           fi
           echo "✅ Backend lockfile is committed"
 
+      - name: Verify exactly one Next.js config exists (client/next.config.mjs)
+        run: |
+          count=$(find . -maxdepth 1 -name "next.config.*" | wc -l)
+          if [ "$count" -ne 0 ]; then
+            echo "❌ Stale root-level next.config.* file(s) detected:"
+            find . -maxdepth 1 -name "next.config.*"
+            echo "Only client/next.config.mjs should exist."
+            exit 1
+          fi
+          if [ ! -f "client/next.config.mjs" ]; then
+            echo "❌ client/next.config.mjs is missing."
+            exit 1
+          fi
+          client_count=$(find client -maxdepth 1 -name "next.config.*" | wc -l)
+          if [ "$client_count" -ne 1 ]; then
+            echo "❌ Expected exactly 1 Next.js config under client/, found $client_count:"
+            find client -maxdepth 1 -name "next.config.*"
+            exit 1
+          fi
+          echo "✅ Exactly one Next.js config found: client/next.config.mjs"
+
       - name: Install client dependencies and verify lockfile
         working-directory: client
         run: |
