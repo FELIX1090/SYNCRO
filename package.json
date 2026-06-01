@@ -1,4 +1,8 @@
 {
+  "scripts": {
+    "check:migrations": "node scripts/check-migration-drift.js",
+    "cleanup:migrations": "node scripts/cleanup-duplicate-migrations.js"
+  },
   "devDependencies": {
     "@types/node": "^25.6.0"
   },
