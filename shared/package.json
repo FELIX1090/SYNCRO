@@ -1,0 +1,17 @@
+{
+  "name": "@syncro/shared",
+  "version": "1.0.0",
+  "description": "Shared domain models and types for SYNCRO",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "watch": "tsc --watch"
+  },
+  "keywords": ["syncro", "types", "domain-models"],
+  "license": "ISC",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

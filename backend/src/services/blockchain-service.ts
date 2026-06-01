@@ -11,6 +11,54 @@ import {
 import { rpc as SorobanRpc } from "@stellar/stellar-sdk";
 import { createClient, RedisClientType } from "redis";
 import { secretProvider } from "./secret-provider";
+import {
+  getBlockchainFlags,
+  resolveStellarNetwork,
+} from "../../../shared/blockchain-flags";
+import { EXTERNAL_SERVICE_POLICIES } from "../config/external-services";
+
+export type PayloadVersion = '1.0';
+
+export interface SubscriptionEventPayload {
+  subscriptionId: string;
+  operation: string;
+  subscriptionName: string;
+  price: string | number;
+  billingCycle: string;
+  status: string;
+  timestamp: string;
+}
+
+export interface ReminderEventPayload {
+  subscriptionId: string;
+  subscriptionName: string;
+  reminderType: string;
+  renewalDate: string;
+  daysBefore: number;
+  price: string | number;
+  billingCycle: string;
+  deliveryChannels: string[];
+  timestamp: string;
+}
+
+export interface GiftCardEventPayload {
+  subscriptionId: string;
+  giftCardHash: string;
+  provider: string;
+  eventType: string;
+  timestamp: string;
+}
+
+export interface DLQPayload<T = unknown> {
+  version: PayloadVersion;
+  eventType: string;
+  payload: T;
+  failedAt: string;
+  errorReason: string;
+  retryCount: number;
+  contractAddress?: string | null;
+  rpcUrl?: string;
+}
 
 export interface BlockchainLogEntry {
   user_id: string;
@@ -27,19 +75,50 @@ export class BlockchainService {
   private rpcUrl: string;
   private networkPassphrase: string;
   private redisClient: RedisClientType | null = null;
-  private readonly maxRetries = 3;
-  private readonly baseRetryDelayMs = 750;
+  private readonly policy = EXTERNAL_SERVICE_POLICIES.stellar_rpc;
 
   constructor() {
     this.contractAddress = process.env.SOROBAN_CONTRACT_ADDRESS || null;
-    this.rpcUrl =
-      process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
+
+    const flags = getBlockchainFlags();
+    const network = resolveStellarNetwork();
+
+    // Resolve RPC URL — never silently fall back to testnet in production.
+    const configuredRpc = process.env.SOROBAN_RPC_URL;
+    if (!configuredRpc && flags.isProduction) {
+      throw new Error(
+        "[blockchain] SOROBAN_RPC_URL must be explicitly set in production. " +
+          "Refusing to fall back to the testnet RPC endpoint.",
+      );
+    }
+    this.rpcUrl = configuredRpc || "https://soroban-testnet.stellar.org";
+
+    // Resolve network passphrase — never silently use testnet passphrase in production.
+    const configuredPassphrase = process.env.STELLAR_NETWORK_PASSPHRASE;
+    if (!configuredPassphrase && flags.isProduction) {
+      throw new Error(
+        "[blockchain] STELLAR_NETWORK_PASSPHRASE must be explicitly set in production. " +
+          "Refusing to fall back to the testnet network passphrase.",
+      );
+    }
     this.networkPassphrase =
-      process.env.STELLAR_NETWORK_PASSPHRASE || Networks.TESTNET;
+      configuredPassphrase ||
+      (network === "mainnet"
+        ? Networks.PUBLIC
+        : network === "futurenet"
+          ? Networks.FUTURENET
+          : Networks.TESTNET);
 
     if (!this.contractAddress) {
       logger.warn(
         "Blockchain contract address not configured. Events will be logged to database only.",
+      );
+    }
+
+    if (!flags.blockchainEnabled) {
+      logger.warn(
+        "ENABLE_BLOCKCHAIN=false — on-chain writes are disabled. " +
+          "All events will be logged to the database only.",
       );
     }
 
@@ -172,7 +251,7 @@ export class BlockchainService {
    * Write event data to Soroban contract
    */
   private async writeToBlockchain(
-    eventData: Record<string, any>,
+    eventData: ReminderEventPayload,
   ): Promise<{ transactionHash: string }> {
     return this.invokeContractWithRetry("log_reminder", this.encodeReminderArgs(eventData));
   }
@@ -320,7 +399,7 @@ export class BlockchainService {
    */
   private async writeSubscriptionToBlockchain(
     operation: "create" | "update" | "delete" | "cancel" | "pause" | "unpause",
-    eventData: Record<string, any>,
+    eventData: SubscriptionEventPayload,
   ): Promise<{ transactionHash: string }> {
     const method = `subscription_${operation}`;
     return this.invokeContractWithRetry(method, this.encodeSubscriptionArgs(eventData));
@@ -413,7 +492,7 @@ export class BlockchainService {
   }
 
   private async writeGiftCardToBlockchain(
-    eventData: Record<string, any>
+    eventData: GiftCardEventPayload
   ): Promise<{ transactionHash: string }> {
     return this.invokeContractWithRetry("gift_card_attached", this.encodeGiftCardArgs(eventData));
   }
@@ -428,6 +507,16 @@ export class BlockchainService {
     if (!this.contractAddress) {
       throw new Error("SOROBAN_CONTRACT_ADDRESS not configured");
     }
+
+    // Honour the ENABLE_BLOCKCHAIN master switch
+    const flags = getBlockchainFlags();
+    if (!flags.blockchainEnabled) {
+      throw new Error(
+        `[blockchain] On-chain write for "${method}" was blocked: ` +
+          "ENABLE_BLOCKCHAIN is set to false.",
+      );
+    }
+
     const rpc = new SorobanRpc.Server(this.rpcUrl);
     
     // Fetch secret from provider
@@ -440,7 +529,9 @@ export class BlockchainService {
     const contract = new Contract(this.contractAddress);
 
     let lastErr: unknown = null;
-    for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+    const { maxAttempts = 3, initialDelay = 500, multiplier = 2 } = this.policy.retryPolicy;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const account = await rpc.getAccount(sourceKeypair.publicKey());
         const tx = new TransactionBuilder(account, {
@@ -448,7 +539,7 @@ export class BlockchainService {
           networkPassphrase: this.networkPassphrase,
         })
           .addOperation(contract.call(method, ...args))
-          .setTimeout(30)
+          .setTimeout(Math.floor(this.policy.timeoutMs / 1000))
           .build();
 
         const sim = await rpc.simulateTransaction(tx);
@@ -468,15 +559,15 @@ export class BlockchainService {
         const getTx = await rpc.getTransaction(send.hash);
         if (getTx.status === "NOT_FOUND") {
           // brief wait+retry fetch
-          await this.sleep(500);
+          await this.sleep(initialDelay);
         }
 
         return { transactionHash: send.hash };
       } catch (err) {
         lastErr = err;
-        const delay = this.baseRetryDelayMs * Math.pow(2, attempt);
+        const delay = Math.min(initialDelay * Math.pow(multiplier, attempt), this.policy.retryPolicy.maxDelay || 30000);
         logger.warn(
-          `Soroban tx attempt ${attempt + 1}/${this.maxRetries} failed for method ${method}: ${
+          `Soroban tx attempt ${attempt + 1}/${maxAttempts} failed for method ${method}: ${
             err instanceof Error ? err.message : String(err)
           } — retrying in ${delay}ms`,
         );
@@ -486,22 +577,24 @@ export class BlockchainService {
 
     // After all retries failed, enqueue to DLQ if available
     await this.enqueueDeadLetter({
-      method,
-      argsJson: this.previewArgs(args),
+      version: '1.0',
+      eventType: method,
+      payload: this.previewArgs(args),
+      failedAt: new Date().toISOString(),
+      errorReason: lastErr instanceof Error ? lastErr.message : String(lastErr),
+      retryCount: maxAttempts,
       contractAddress: this.contractAddress,
       rpcUrl: this.rpcUrl,
-      error: lastErr instanceof Error ? lastErr.message : String(lastErr),
-      createdAt: new Date().toISOString(),
     });
 
     throw new Error(
-      `Soroban transaction failed after ${this.maxRetries} attempts: ${
+      `Soroban transaction failed after ${maxAttempts} attempts: ${
         lastErr instanceof Error ? lastErr.message : String(lastErr)
       }`,
     );
   }
 
-  private encodeReminderArgs(eventData: Record<string, any>): xdr.ScVal[] {
+  private encodeReminderArgs(eventData: ReminderEventPayload): xdr.ScVal[] {
     return [
       xdr.ScVal.scvString(eventData.subscriptionId),
       xdr.ScVal.scvString(eventData.subscriptionName ?? ""),
@@ -517,7 +610,7 @@ export class BlockchainService {
     ];
   }
 
-  private encodeSubscriptionArgs(eventData: Record<string, any>): xdr.ScVal[] {
+  private encodeSubscriptionArgs(eventData: SubscriptionEventPayload): xdr.ScVal[] {
     return [
       xdr.ScVal.scvString(eventData.subscriptionId),
       xdr.ScVal.scvString(eventData.operation ?? ""),
@@ -529,7 +622,7 @@ export class BlockchainService {
     ];
   }
 
-  private encodeGiftCardArgs(eventData: Record<string, any>): xdr.ScVal[] {
+  private encodeGiftCardArgs(eventData: GiftCardEventPayload): xdr.ScVal[] {
     return [
       xdr.ScVal.scvString(eventData.subscriptionId),
       xdr.ScVal.scvString(eventData.giftCardHash),
@@ -538,7 +631,7 @@ export class BlockchainService {
     ];
   }
 
-  private async enqueueDeadLetter(payload: Record<string, any>): Promise<void> {
+  private async enqueueDeadLetter<T>(payload: DLQPayload<T>): Promise<void> {
     const dlqKey = "dlq:blockchain_tx";
     try {
       if (this.redisClient) {

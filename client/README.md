@@ -1,6 +1,6 @@
-# Synchro Client (Frontend)
+# @syncro/client
 
-The frontend client application for Synchro, built with Next.js 15, React 19, and TypeScript. This is the user-facing web application that provides the subscription management interface, dashboard, analytics, and integration management.
+The frontend client application for SYNCRO (`@syncro/client`), built with Next.js 15, React 19, and TypeScript. This is the user-facing web application that provides the subscription management interface, dashboard, analytics, and integration management.
 
 ## Overview
 
@@ -52,51 +52,39 @@ client/
 └── public/                # Static assets
 ```
 
-## Current State
+## Current State (April 2026)
 
 ### ✅ Implemented
 - Complete UI/UX with all pages and components
-- Dashboard with analytics and subscription management
-- Authentication pages (login, signup)
-- Settings and team management
-- Notifications system
-- Onboarding flow
-- Command palette (Ctrl+K)
-- Keyboard shortcuts
-- Dark mode support
-- Responsive design
-- Accessibility features
-- Business logic utilities (validation, currency, timezone, etc.)
+- Dashboard with real-time analytics and subscription management
+- Authentication and MFA flows (Fully enforced)
+- Real database connection (Supabase PostgreSQL)
+- All business logic utilities (validation, currency, timezone, etc.)
 - Security utilities (sanitization, CSRF, rate limiting)
-- Database schema (SQL scripts ready)
+- Automated reminders and notification system
+- Command palette and accessibility features
 
 ### ⚠️ Partially Implemented
-- API routes (exist but return mock data)
-- Supabase integration (utilities exist but have environment variable typos)
-- Authentication (pages exist but not enforced)
+- **Email Integrations**: Gmail/Outlook scanning services are active; refining deep parsing logic for complex invoices.
+- **Payment Processing**: Stripe and Paystack are configured; live payment flows are in final testing.
 
 ### ❌ Not Implemented
-- Real database connection (currently using mock data)
-- Email integrations (Gmail, Outlook)
-- Real payment processing
-- Real-time notifications
-- Production deployment configuration
+- **On-Chain Automation**: Waiting for non-custodial Stellar card issuance availability.
+
+**Owner**: Frontend Team
+**Update Cadence**: Monthly
 
 ## Setup
 
 ### Prerequisites
 - Node.js 20+
-- npm, yarn, or pnpm
+- npm (bundled with Node.js)
 
 ### Installation
 
 ```bash
 cd client
 npm install
-# or
-yarn install
-# or
-pnpm install
 ```
 
 ### Environment Variables
@@ -104,10 +92,9 @@ pnpm install
 Create a `.env.local` file:
 
 ```bash
-# Supabase
+# Supabase (anon key only — service-role key is reserved for the backend)
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
 # Stripe
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...
@@ -144,7 +131,7 @@ Open [http://localhost:3000](http://localhost:3000)
 ### Integrations
 - Gmail email scanning (UI ready, integration pending)
 - Outlook email scanning (UI ready, integration pending)
-- Calendar sync (planned)
+- Calendar sync (iCal feed export — see `backend/CALENDAR_INTEGRATION_GUIDE.md`)
 - Slack notifications (planned)
 
 ### Team Management

@@ -1,18 +1,21 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiGet } from "../lib/api";
 import { useUndoManager } from "@/hooks/use-undo-manager";
 import type { Subscription as DBSubscription } from "@/lib/supabase/subscriptions";
 import {
   createSubscription,
   updateSubscription,
-  deleteSubscription as dbDeleteSubscription,
+  deleteSubscription,
   bulkDeleteSubscriptions,
 } from "@/lib/supabase/subscriptions";
 import { retryWithBackoff, getErrorMessage } from "@/lib/network-utils";
 import { validateSubscriptionData } from "@/lib/validation";
 import { checkDuplicate } from "@/lib/subscription-utils";
+
+const SUBS_KEY = ["subscriptions"] as const;
 
 interface UseSubscriptionsProps {
   initialSubscriptions: DBSubscription[];
@@ -21,7 +24,6 @@ interface UseSubscriptionsProps {
   onToast: (toast: any) => void;
   onUpgradePlan: () => void;
   onShowDialog?: (dialog: any) => void;
-  onDeleteWithUndo?: (subscription: DBSubscription) => void;
 }
 
 export function useSubscriptions({
@@ -31,7 +33,6 @@ export function useSubscriptions({
   onToast,
   onUpgradePlan,
   onShowDialog,
-  onDeleteWithUndo,
 }: UseSubscriptionsProps) {
   const {
     currentState: subscriptions,
@@ -94,7 +95,7 @@ export function useSubscriptions({
     };
   }, [addToHistory]);
 
-  const [loading, setLoading] = useState(false);
+  const loading = addMutation.isPending;
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [selectedSubscriptions, setSelectedSubscriptions] = useState<
     Set<number>
@@ -108,195 +109,161 @@ export function useSubscriptions({
     [addToHistory]
   );
 
+  const queryClient = useQueryClient();
+
+  const addMutation = useMutation({
+    mutationFn: (newSub: any) =>
+      retryWithBackoff(() =>
+        createSubscription({
+          name: newSub.name,
+          category: newSub.category,
+          price: newSub.price,
+          icon: newSub.icon || "🔗",
+          renews_in: newSub.renewsIn || 30,
+          status: newSub.status || "active",
+          color: newSub.color || "#000000",
+          renewal_url: newSub.renewalUrl || null,
+          tags: newSub.tags || [],
+          date_added: new Date().toISOString(),
+          email_account_id: emailAccounts.find((acc) => acc.isPrimary)?.id || 1,
+          last_used_at: undefined,
+          has_api_key: false,
+          is_trial: newSub.isTrial || false,
+          trial_ends_at: newSub.trialEndsAt || null,
+          price_after_trial: newSub.priceAfterTrial || null,
+          source: "manual",
+          manually_edited: false,
+          edited_fields: [],
+          pricing_type: "fixed",
+          billing_cycle: "monthly",
+        })
+      ),
+    onMutate: async (newSub: any) => {
+      await queryClient.cancelQueries({ queryKey: SUBS_KEY });
+      const optimisticSub = {
+        id: Date.now(), // temp id replaced on settle
+        name: newSub.name,
+        category: newSub.category,
+        price: newSub.price,
+        icon: newSub.icon || "🔗",
+        renewsIn: newSub.renewsIn || 30,
+        status: newSub.status || "active",
+        color: newSub.color || "#000000",
+        renewalUrl: newSub.renewalUrl || null,
+        tags: newSub.tags || [],
+        dateAdded: new Date().toISOString(),
+        emailAccountId: emailAccounts.find((acc) => acc.isPrimary)?.id || 1,
+        hasApiKey: false,
+        isTrial: newSub.isTrial || false,
+        trialEndsAt: newSub.trialEndsAt || null,
+        priceAfterTrial: newSub.priceAfterTrial || null,
+        source: "manual",
+        manuallyEdited: false,
+        editedFields: [],
+        pricingType: "fixed",
+        billingCycle: "monthly",
+        _optimistic: true,
+      };
+      const previous = subscriptions;
+      updateSubscriptions([...subscriptions, optimisticSub]);
+      return { previous, optimisticSub };
+    },
+    onError: (_err, _newSub, context: any) => {
+      if (context?.previous) updateSubscriptions(context.previous);
+      onToast({ title: "Error", description: getErrorMessage(_err), variant: "error" });
+    },
+    onSuccess: (dbSubscription, _newSub, context: any) => {
+      const formattedSub = {
+        id: dbSubscription.id,
+        name: dbSubscription.name,
+        category: dbSubscription.category,
+        price: dbSubscription.price,
+        icon: dbSubscription.icon,
+        renewsIn: dbSubscription.renews_in,
+        status: dbSubscription.status,
+        color: dbSubscription.color,
+        renewalUrl: dbSubscription.renewal_url,
+        tags: dbSubscription.tags,
+        dateAdded: dbSubscription.date_added,
+        emailAccountId: dbSubscription.email_account_id,
+        lastUsedAt: dbSubscription.last_used_at,
+        hasApiKey: dbSubscription.has_api_key,
+        isTrial: dbSubscription.is_trial,
+        trialEndsAt: dbSubscription.trial_ends_at,
+        priceAfterTrial: dbSubscription.price_after_trial,
+        source: dbSubscription.source,
+        manuallyEdited: dbSubscription.manually_edited,
+        editedFields: dbSubscription.edited_fields,
+        pricingType: dbSubscription.pricing_type,
+        billingCycle: dbSubscription.billing_cycle,
+      };
+      // Replace optimistic entry with real one
+      const updated = subscriptions
+        .filter((s: any) => s.id !== context?.optimisticSub?.id)
+        .concat(formattedSub);
+      updateSubscriptions(updated);
+      onToast({
+        title: "Subscription added",
+        description: `${dbSubscription.name} has been added to your subscriptions`,
+        variant: "success",
+        action: {
+          label: "Undo",
+          onClick: async () => {
+            try {
+              await deleteSubscription(dbSubscription.id);
+              undo();
+              onToast({ title: "Undone", description: "Subscription addition has been undone", variant: "default" });
+            } catch {
+              onToast({ title: "Error", description: "Failed to undo subscription addition", variant: "error" });
+            }
+          },
+        },
+      });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteSubscription(id),
+    onMutate: async (id: number) => {
+      await queryClient.cancelQueries({ queryKey: SUBS_KEY });
+      const previous = subscriptions;
+      updateSubscriptions(subscriptions.filter((s: any) => s.id !== id));
+      return { previous };
+    },
+    onError: (_err, _id, context: any) => {
+      if (context?.previous) updateSubscriptions(context.previous);
+      onToast({ title: "Error", description: "Failed to delete subscription", variant: "error" });
+    },
+    onSuccess: (_data, id) => {
+      const sub = subscriptions.find((s: any) => s.id === id);
+      onToast({ title: "Subscription deleted", description: `${sub?.name ?? "Subscription"} has been removed`, variant: "success" });
+    },
+  });
+
   const handleAddSubscription = useCallback(
     async (newSub: any) => {
       const validation = validateSubscriptionData(newSub);
       if (!validation.isValid) {
         const firstError = Object.values(validation.errors)[0];
-        onToast({
-          title: "Validation error",
-          description: firstError,
-          variant: "error",
-        });
+        onToast({ title: "Validation error", description: firstError, variant: "error" });
         return;
       }
-
       if (checkDuplicate(subscriptions, newSub.name)) {
-        onToast({
-          title: "Duplicate subscription",
-          description: `${newSub.name} already exists in your subscriptions`,
-          variant: "error",
-        });
+        onToast({ title: "Duplicate subscription", description: `${newSub.name} already exists in your subscriptions`, variant: "error" });
         return;
       }
-
       if (subscriptions.length >= maxSubscriptions) {
         onUpgradePlan();
         return;
       }
-
-      setLoading(true);
-
-      try {
-        const dbSubscription = await retryWithBackoff(async () => {
-          return await createSubscription({
-            name: newSub.name,
-            category: newSub.category,
-            price: newSub.price,
-            icon: newSub.icon || "🔗",
-            renews_in: newSub.renewsIn || 30,
-            status: newSub.status || "active",
-            color: newSub.color || "#000000",
-            renewal_url: newSub.renewalUrl || null,
-            tags: newSub.tags || [],
-            date_added: new Date().toISOString(),
-            email_account_id:
-              emailAccounts.find((acc) => acc.isPrimary)?.id || 1,
-            last_used_at: undefined,
-            has_api_key: false,
-            is_trial: (newSub as any).isTrial || false,
-            trial_ends_at: (newSub as any).trialEndsAt || null,
-            price_after_trial: (newSub as any).priceAfterTrial || null,
-            source: "manual",
-            manually_edited: false,
-            edited_fields: [],
-            pricing_type: "fixed",
-            billing_cycle: "monthly",
-          });
-        });
-
-        const formattedSub = {
-          id: dbSubscription.id,
-          name: dbSubscription.name,
-          category: dbSubscription.category,
-          price: dbSubscription.price,
-          icon: dbSubscription.icon,
-          renewsIn: dbSubscription.renews_in,
-          status: dbSubscription.status,
-          color: dbSubscription.color,
-          renewalUrl: dbSubscription.renewal_url,
-          tags: dbSubscription.tags,
-          dateAdded: dbSubscription.date_added,
-          emailAccountId: dbSubscription.email_account_id,
-          lastUsedAt: dbSubscription.last_used_at,
-          hasApiKey: dbSubscription.has_api_key,
-          isTrial: dbSubscription.is_trial,
-          trialEndsAt: dbSubscription.trial_ends_at,
-          priceAfterTrial: dbSubscription.price_after_trial,
-          source: dbSubscription.source,
-          manuallyEdited: dbSubscription.manually_edited,
-          editedFields: dbSubscription.edited_fields,
-          pricingType: dbSubscription.pricing_type,
-          billingCycle: dbSubscription.billing_cycle,
-        };
-
-        const updatedSubs = [...subscriptions, formattedSub];
-        updateSubscriptions(updatedSubs);
-
-        onToast({
-          title: "Subscription added",
-          description: `${newSub.name} has been added to your subscriptions`,
-          variant: "success",
-          action: {
-            label: "Undo",
-            onClick: async () => {
-              try {
-                await deleteSubscription(dbSubscription.id);
-                undo();
-                onToast({
-                  title: "Undone",
-                  description: "Subscription addition has been undone",
-                  variant: "default",
-                });
-              } catch (error) {
-                onToast({
-                  title: "Error",
-                  description: "Failed to undo subscription addition",
-                  variant: "error",
-                });
-              }
-            },
-          },
-        });
-      } catch (error) {
-        const errorMessage = getErrorMessage(error);
-        onToast({
-          title: "Error",
-          description: errorMessage,
-          variant: "error",
-          action: {
-            label: "Retry",
-            onClick: () => handleAddSubscription(newSub),
-          },
-        });
-      } finally {
-        setLoading(false);
-      }
+      addMutation.mutate(newSub);
     },
-    [
-      subscriptions,
-      maxSubscriptions,
-      emailAccounts,
-      updateSubscriptions,
-      undo,
-      onToast,
-      onUpgradePlan,
-    ]
+    [subscriptions, maxSubscriptions, onToast, onUpgradePlan, addMutation]
   );
 
   const handleDeleteSubscription = useCallback(
-    async (id: number) => {
-      const sub = subscriptions.find((s) => s.id === id);
-      if (!sub) return;
-
-      let deletedSubToRestore: DBSubscription | null = null;
-
-      if (onDeleteWithUndo) {
-        onDeleteWithUndo(sub);
-        deletedSubToRestore = sub;
-        const updatedSubs = subscriptions.filter((s) => s.id !== id);
-        updateSubscriptions(updatedSubs);
-
-        onToast({
-          title: "Subscription deleted",
-          description: `${sub.name} has been removed`,
-          variant: "success",
-          action: {
-            label: "Undo",
-            onClick: async () => {
-              if (deletedSubToRestore) {
-                const restoredSubs = [...subscriptions, deletedSubToRestore];
-                updateSubscriptions(restoredSubs);
-                onToast({
-                  title: "Restored",
-                  description: `${deletedSubToRestore.name} has been restored`,
-                  variant: "success",
-                });
-              }
-            },
-          },
-        });
-      } else {
-        try {
-          await dbDeleteSubscription(id);
-          const updatedSubs = subscriptions.filter((s) => s.id !== id);
-          updateSubscriptions(updatedSubs);
-
-          onToast({
-            title: "Subscription deleted",
-            description: `${sub.name} has been removed`,
-            variant: "success",
-          });
-        } catch (error) {
-          onToast({
-            title: "Error",
-            description: "Failed to delete subscription",
-            variant: "error",
-          });
-        }
-      }
-    },
-    [subscriptions, updateSubscriptions, onToast, onDeleteWithUndo]
+    (id: number) => { deleteMutation.mutate(id); },
+    [deleteMutation]
   );
 
   const handleEditSubscription = useCallback(

@@ -12,6 +12,7 @@ import {
   Play,
   Ban,
   Bell,
+  Gift,
 } from "lucide-react"
 import { useState } from "react"
 import NotificationPreferencesModal from "@/components/modals/notification-preferences-modal"
@@ -19,6 +20,10 @@ import { NotesEditor } from "@/components/ui/notes-editor"
 import { TagInput } from "@/components/ui/tag-input"
 import { useTags } from "@/hooks/use-tags"
 import { apiPost } from "@/lib/api"
+import {
+  getGiftCardProviderFromSubscription,
+  openAtomicWalletGiftCard,
+} from "@/lib/atomic-wallet"
 
 const CANCEL_LINKS: Record<string, string> = {
   "ChatGPT Plus": "https://platform.openai.com/account/billing/overview",
@@ -33,6 +38,9 @@ const CANCEL_LINKS: Record<string, string> = {
   "Figma Professional": "https://www.figma.com/settings",
   "Vercel Pro": "https://vercel.com/account/billing",
 }
+
+import { formatDate } from "@/lib/timezone-utils"
+import { formatCurrency } from "@/lib/currency-utils"
 
 interface ManageSubscriptionModalProps {
   subscription: any
@@ -75,6 +83,9 @@ export default function ManageSubscriptionModal({
   }
 
   const cancelLink = CANCEL_LINKS[subscription.name] || subscription.renewalUrl
+  const giftCardProvider = getGiftCardProviderFromSubscription(subscription)
+  const giftCardAmount = Number(subscription.price || 0)
+  const canBuyGiftCard = Boolean(giftCardProvider && giftCardAmount > 0)
 
   const handleDelete = () => {
     onDelete()
@@ -226,9 +237,7 @@ export default function ManageSubscriptionModal({
                     <p className="text-xl font-bold">
                       {subscription.status === "cancelled" &&
                       subscription.activeUntil
-                        ? new Date(
-                            subscription.activeUntil,
-                          ).toLocaleDateString()
+                        ? formatDate(subscription.activeUntil)
                         : `${subscription.renewsIn} days`}
                     </p>
                   </div>
@@ -239,8 +248,7 @@ export default function ManageSubscriptionModal({
               {subscription.status === "paused" && subscription.resumesAt && (
                 <div className="mt-4 p-3 bg-[#FFD166]/10 border border-[#FFD166]/30 rounded-lg">
                   <p className="text-sm text-[#FFD166]">
-                    Paused - Resumes on{" "}
-                    {new Date(subscription.resumesAt).toLocaleDateString()}
+                    Paused - Resumes on {formatDate(subscription.resumesAt)}
                   </p>
                 </div>
               )}
@@ -249,10 +257,7 @@ export default function ManageSubscriptionModal({
                 subscription.activeUntil && (
                   <div className="mt-4 p-3 bg-[#E86A33]/10 border border-[#E86A33]/30 rounded-lg">
                     <p className="text-sm text-[#E86A33]">
-                      Cancelled - Active until{" "}
-                      {new Date(
-                        subscription.activeUntil,
-                      ).toLocaleDateString()}
+                      Cancelled - Active until {formatDate(subscription.activeUntil)}
                     </p>
                   </div>
                 )}
@@ -260,8 +265,7 @@ export default function ManageSubscriptionModal({
               {subscription.status === "expired" && subscription.expiredAt && (
                 <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
                   <p className="text-sm text-red-500">
-                    Expired on{" "}
-                    {new Date(subscription.expiredAt).toLocaleDateString()} due
+                    Expired on {formatDate(subscription.expiredAt)} due
                     to inactivity
                   </p>
                 </div>
@@ -317,6 +321,15 @@ export default function ManageSubscriptionModal({
                   </button>
                 )}
 
+              {canBuyGiftCard && (
+                <button
+                  onClick={() => openAtomicWalletGiftCard(giftCardAmount, giftCardProvider!)}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-[#007A5C] text-white rounded-lg font-semibold hover:bg-[#007A5C]/90 transition-colors"
+                >
+                  <Gift className="w-4 h-4" />
+                  Buy Gift Card
+                </button>
+              )}
               <button
                 onClick={onEdit}
                 className={`w-full flex items-center justify-center gap-2 px-4 py-3 border-2 ${
@@ -449,18 +462,12 @@ export default function ManageSubscriptionModal({
               >
                 Cancel subscription?
               </h3>
-              <p
-                className={`text-sm mb-6 ${
-                  darkMode ? "text-gray-400" : "text-gray-600"
-                }`}
-              >
+              <p className={`text-sm mb-6 ${darkMode ? "text-gray-400" : "text-gray-600"}`}>
                 {subscription.name} will remain active until{" "}
-                {new Date(
-                  Date.now() +
-                    (subscription.renewsIn || 0) * 24 * 60 * 60 * 1000,
-                ).toLocaleDateString()}
+                {formatDate(addDays(new Date(), subscription.renewsIn || 0))}
                 , then stop renewing.
               </p>
+
               <div className="flex gap-3">
                 <button
                   onClick={() => setShowConfirmCancel(false)}

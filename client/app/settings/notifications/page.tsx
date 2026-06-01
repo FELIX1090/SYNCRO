@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
 import QuietHoursSettings from "@/components/settings/QuietHoursSettings"
+import CalendarSettings from "@/components/settings/CalendarSettings"
+import ReminderSettings from "@/components/settings/ReminderSettings"
 import Link from "next/link"
 
 export default async function NotificationSettingsPage() {
@@ -33,7 +35,7 @@ export default async function NotificationSettingsPage() {
         
         <h1 className="text-3xl font-bold tracking-tight">Notification Settings</h1>
         <p className="text-muted-foreground mt-2">
-          Manage your notification preferences and quiet hours to control when you receive alerts.
+          Manage your notification preferences, calendar sync, and quiet hours to control when you receive alerts.
         </p>
       </div>
 
@@ -57,6 +59,16 @@ export default async function NotificationSettingsPage() {
         >
           Privacy
         </Link>
+      </div>
+
+      {/* Reminder Settings */}
+      <div className="mb-8">
+        <ReminderSettings />
+      </div>
+
+      {/* Calendar Sync */}
+      <div className="mb-8">
+        <CalendarSettings />
       </div>
 
       {/* Quiet Hours Settings */}

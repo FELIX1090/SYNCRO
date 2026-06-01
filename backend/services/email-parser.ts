@@ -1,3 +1,6 @@
+import { llmParser } from '../src/services/llm-parser';
+import { normalizeMerchant } from '../utils/merchant-normalizer';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ParseEmailInput {
@@ -58,6 +61,36 @@ const INTERVAL_MATCHERS: IntervalMatcher[] = [
 
 // ── Exported function ─────────────────────────────────────────────────────────
 
+/** Async variant — tries regex first, falls back to Gemini if confidence < 0.9 */
+export async function parseSubscriptionEmailWithFallback(
+  input: ParseEmailInput,
+): Promise<ParsedSubscription | null> {
+  const regexResult = parseSubscriptionEmail(input);
+
+  if (regexResult && regexResult.confidence >= 0.9) return regexResult;
+
+  if (!llmParser.isAvailable) return regexResult;
+
+  const combined = `${input.subject ?? ''}\n${input.body ?? ''}`.trim();
+  const llmResult = await llmParser.parse(combined);
+
+  if (!llmResult) return regexResult;
+
+  // Prefer LLM result when it has higher confidence
+  if (!regexResult || llmResult.confidence > regexResult.confidence) {
+    return {
+      name: llmResult.name,
+      amount: llmResult.amount,
+      currency: llmResult.currency,
+      interval: llmResult.interval,
+      signals: [],
+      confidence: llmResult.confidence,
+    };
+  }
+
+  return regexResult;
+}
+
 export function parseSubscriptionEmail({
   subject,
   from,
@@ -71,7 +104,10 @@ export function parseSubscriptionEmail({
 
   const { amount, currency } = extractAmount(normalized)
   const interval = detectInterval(normalized)
-  const name = extractSenderName(from)
+  // Use normalized merchant name for consistency, fallback to raw sender extraction
+  const rawName = extractSenderName(from)
+  const normalizedName = normalizeMerchantName(from)
+  const name = normalizedName ?? rawName
 
   if (!signals.length && !strongSignal) return null
   if (!amount && !strongSignal && !interval) return null
@@ -81,6 +117,8 @@ export function parseSubscriptionEmail({
   if (strongSignal) confidence += 0.2
   if (amount) confidence += 0.2
   if (interval) confidence += 0.1
+  // Boost confidence when we have normalized merchant name
+  if (normalizedName && rawName !== normalizedName) confidence += 0.15
   confidence = Math.min(confidence, 0.95)
 
   return { name, amount, currency, interval, signals, confidence }
@@ -110,6 +148,12 @@ function extractSenderName(from?: string | null): string | null {
   if (emailMatch) return emailMatch[1]
 
   return trimmed
+}
+
+function normalizeMerchantName(from?: string | null): string | null {
+  if (!from) return null;
+  const match = normalizeMerchant(from);
+  return match?.canonicalName ?? null;
 }
 
 function extractAmount(text: string): ExtractedAmount {
@@ -160,4 +204,10 @@ function detectInterval(text: string): string | null {
     if (matcher.pattern.test(text)) return matcher.value
   }
   return null
+}
+
+export function extractMerchantForTest(from?: string | null): string | null {
+  const rawName = extractSenderName(from);
+  const normalizedName = normalizeMerchantName(from);
+  return normalizedName ?? rawName;
 }

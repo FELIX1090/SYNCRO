@@ -19,6 +19,9 @@ Migration files are organized into two directories based on their domain. They a
 3. **Create Migration**: Use `supabase migration new <description>`. Move the generated file to `backend/migrations/` if it is a backend-specific change.
 4. **Apply and Test**: Apply locally with `supabase db push` or `npm run db:migrate`.
 5. **CI Check**: The continuous integration pipeline will automatically run the drift check on your PR to prevent conflicting schema changes.
+All migration files live in `supabase/migrations/` and are applied in lexicographic order.
+`supabase/migrations/` is the canonical migration source of truth for this repository.
+Legacy SQL snapshots under `backend/migrations/` and `backend/scripts/` are kept for reference only.
 
 ### Prerequisites
 
@@ -106,12 +109,15 @@ Every pull request that touches `supabase/migrations/` triggers the
 2. Applies all migrations from scratch (`supabase db push`)
 3. Runs `supabase db lint` to catch SQL issues
 
+Changes under `backend/migrations/` and `backend/scripts/` are not part of the canonical migration validation path.
+
 A PR cannot be merged if this workflow fails.
 
 ### Seed data
 
 `supabase/seed.sql` contains fake data for local development only.
 It is applied automatically by `supabase db reset`.
+Use the same seed file for local development and E2E bootstrap runs.
 
 **Never add real emails, payment data, or any PII to seed.sql.**
 Thank you for your interest in contributing! This guide will help you set up the project, follow conventions, and submit high-quality contributions.
@@ -121,7 +127,7 @@ Thank you for your interest in contributing! This guide will help you set up the
 ## Development Setup
 
 - Node.js >= 20
-- npm or yarn
+- npm (bundled with Node.js — do not use yarn or pnpm)
 - Supabase CLI (for database)
 - (Optional) Stellar CLI for contract interactions
 
@@ -235,6 +241,7 @@ If you encounter any issues with the branch protection or have questions about t
 ## Additional Resources
 
 - [PR Submission Guide](./PR_SUBMISSION_GUIDE.md)
+- [PR Submission Guide](./docs/archive/PR_SUBMISSION_GUIDE.md)
 - [Backend README](./backend/README.md)
 - [Client README](./client/README.md)
 - [GitHub Docs on Branch Protection](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
@@ -242,3 +249,6 @@ If you encounter any issues with the branch protection or have questions about t
 ---
 
 Thank you for helping make Synchro better! 🚀
+
+## Issue Delivery Notes
+When completing an issue, any long-form implementation artifacts, summaries, or delivery notes must be stored in the `docs/archive/` directory rather than the repository root. This keeps the root directory clean and ensures that active project entrypoints are easy to find.

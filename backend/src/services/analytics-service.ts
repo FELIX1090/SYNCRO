@@ -2,7 +2,6 @@ import { supabase } from '../config/database';
 import logger from '../config/logger';
 import { AnalyticsSummary, MonthlySpend, CategorySpend, SubscriptionSpend, Budget } from '../types/analytics';
 import { Subscription } from '../types/reminder';
-import { riskNotificationService } from './risk-detection/risk-notification-service';
 
 export class AnalyticsService {
   /**
@@ -244,6 +243,91 @@ export class AnalyticsService {
       }
     } catch (error) {
       logger.error('Error checking budget threshold:', error);
+    }
+  }
+
+  /**
+   * Get spending trends for the user
+   */
+  async getSpending(userId: string) {
+    try {
+      const { data: subscriptions, error: subError } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (subError) throw subError;
+
+      const typedSubs = (subscriptions || []) as Subscription[];
+      const monthlyTrend = await this.getMonthlyTrend(userId, typedSubs);
+      const categoryBreakdown = this.calculateCategoryBreakdown(typedSubs, this.calculateTotalMonthlySpend(typedSubs));
+
+      return {
+        current_month_spend: this.calculateTotalMonthlySpend(typedSubs),
+        monthly_trend: monthlyTrend,
+        category_breakdown: categoryBreakdown,
+        active_subscriptions: typedSubs.length
+      };
+    } catch (error) {
+      logger.error('Error fetching spending data:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get spending forecast for the next 6 months
+   */
+  async getForecast(userId: string) {
+    try {
+      const { data: subscriptions, error: subError } = await supabase
+        .from('subscriptions')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('status', 'active');
+
+      if (subError) throw subError;
+
+      const typedSubs = (subscriptions || []) as Subscription[];
+      const forecast: MonthlySpend[] = [];
+      const now = new Date();
+
+      // Generate forecast for next 6 months
+      for (let i = 0; i < 6; i++) {
+        const targetDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        const monthStr = targetDate.toISOString().substring(0, 7);
+        
+        let monthlyTotal = 0;
+        let count = 0;
+
+        // Calculate spend for each active subscription in this month
+        for (const sub of typedSubs) {
+          const createdAt = new Date(sub.created_at);
+          const nextBillingDate = sub.next_billing_date ? new Date(sub.next_billing_date) : createdAt;
+          
+          // Check if subscription will be active in this month
+          if (createdAt <= new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0)) {
+            // Check if the subscription isn't cancelled or will be cancelled before this month
+            if (!sub.cancelled_at || new Date(sub.cancelled_at) > new Date(targetDate.getFullYear(), targetDate.getMonth(), 1)) {
+              monthlyTotal += this.normalizeToMonthly(sub.price, sub.billing_cycle);
+              count++;
+            }
+          }
+        }
+
+        forecast.push({
+          month: monthStr,
+          total_spend: parseFloat(monthlyTotal.toFixed(2)),
+          count: count
+        });
+      }
+
+      return {
+        forecast,
+        avg_projected_monthly_spend: parseFloat((forecast.reduce((sum, m) => sum + m.total_spend, 0) / forecast.length).toFixed(2))
+      };
+    } catch (error) {
+      logger.error('Error fetching forecast data:', error);
+      throw error;
     }
   }
 }
