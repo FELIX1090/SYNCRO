@@ -26,6 +26,7 @@ export class UserPreferenceService {
         locale: 'en-US',
         calendar_sync_enabled: false,
         calendar_export_reminders: true,
+        privacy_mode_enabled: false,
     };
 
     /**
