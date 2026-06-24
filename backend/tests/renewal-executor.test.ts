@@ -15,6 +15,10 @@ jest.mock('../src/services/webhook-service', () => ({
   webhookService: { dispatchEvent: jest.fn().mockReturnValue(Promise.resolve()) },
 }));
 
+jest.mock('../src/services/stealth-scanner', () => ({
+  stealthScanner: { storeStealthPayment: jest.fn().mockResolvedValue(undefined) },
+}));
+
 import { RenewalExecutor } from '../src/services/renewal-executor';
 import { supabase } from '../src/config/database';
 import { blockchainService } from '../src/services/blockchain-service';
@@ -195,5 +199,43 @@ describe('RenewalExecutor', () => {
     const result = await executor.executeRenewal(mockRequest);
     expect(result.success).toBe(false);
     expect(result.failureReason).toBe('billing_window_invalid');
+  });
+
+  // Stealth payment tests
+  it('should execute renewal with stealth payment', async () => {
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'renewal_approvals') return makeChain({ data: { approval_id: 'approval-789', max_spend: 15.0, expires_at: null, used: false }, error: null });
+      if (table === 'subscriptions') return makeChain({ data: { status: 'active', next_billing_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(), billing_cycle: 'monthly' }, error: null });
+      return makeChain({ data: null, error: null });
+    });
+    (blockchainService.syncSubscription as jest.Mock).mockResolvedValue({ success: true, transactionHash: 'tx-hash-stealth' });
+
+    const stealthRequest = {
+      ...mockRequest,
+      useStealthPayment: true,
+      ephemeralPubkey: 'a'.repeat(64), // 32 bytes in hex
+    };
+
+    const result = await executor.executeRenewal(stealthRequest);
+    expect(result.success).toBe(true);
+    expect(result.transactionHash).toBe('tx-hash-stealth');
+  });
+
+  it('should reject stealth payment without ephemeralPubkey', async () => {
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'renewal_approvals') return makeChain({ data: { approval_id: 'approval-789', max_spend: 15.0, expires_at: null, used: false }, error: null });
+      if (table === 'subscriptions') return makeChain({ data: { status: 'active', next_billing_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString() }, error: null });
+      return makeChain({ data: null, error: null });
+    });
+
+    const stealthRequest = {
+      ...mockRequest,
+      useStealthPayment: true,
+      // ephemeralPubkey intentionally missing
+    };
+
+    const result = await executor.executeRenewal(stealthRequest);
+    expect(result.success).toBe(false);
+    expect(result.failureReason).toBe('stealth_payment_invalid');
   });
 });
