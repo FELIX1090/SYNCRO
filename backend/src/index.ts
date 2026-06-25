@@ -53,6 +53,8 @@ import { adminAuth } from './middleware/admin';
 import { createAdminLimiter, RateLimiterFactory } from './middleware/rate-limit-factory';
 import { scheduleAutoResume } from './jobs/auto-resume';
 import giftCardLedgerRoutes from './routes/gift-card-ledger';
+import privacyRoutes from './routes/privacy';
+import analyticsRoutes from './routes/analytics';
 import { errorHandler } from './middleware/errorHandler';
 import { swaggerSpec } from './swagger';
 
@@ -128,6 +130,8 @@ app.use('/api/mfa', mfaRoutes);
 app.use('/api/notifications/push', pushNotificationRoutes);
 app.use('/api/exchange-rates', createExchangeRatesRouter(exchangeRateService));
 app.use('/api/gift-card-ledger', giftCardLedgerRoutes);
+app.use('/api/privacy', privacyRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 app.get('/api/reminders/status', (req, res) => {
   const status = schedulerService.getStatus();

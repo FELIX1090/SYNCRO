@@ -7,6 +7,8 @@ export interface RequestContext {
   requestId: string;
   /** Populated by auth middleware once the user is known */
   userId?: string;
+  isPrivacyModeEnabled?: boolean;
+  privacyPreferences?: any;
 }
 
 /** Extended Express Request with requestId attached */
@@ -64,5 +66,25 @@ export function setRequestUserId(userId: string): void {
   const store = requestContextStorage.getStore();
   if (store) {
     store.userId = userId;
+  }
+}
+
+/**
+ * Call this from your auth middleware after fetching user's privacy mode status
+ */
+export function setRequestPrivacyMode(enabled: boolean): void {
+  const store = requestContextStorage.getStore();
+  if (store) {
+    store.isPrivacyModeEnabled = enabled;
+  }
+}
+
+/**
+ * Call this from your auth middleware to store full user privacy preferences in context
+ */
+export function setRequestPrivacyPreferences(prefs: any): void {
+  const store = requestContextStorage.getStore();
+  if (store) {
+    store.privacyPreferences = prefs;
   }
 }

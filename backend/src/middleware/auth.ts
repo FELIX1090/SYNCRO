@@ -2,8 +2,30 @@ import * as crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { supabase } from '../config/database';
 import logger from '../config/logger';
-import { setRequestUserId } from './requestContext';
+import { setRequestUserId, setRequestPrivacyMode, setRequestPrivacyPreferences } from './requestContext';
 import * as Sentry from '@sentry/node';
+
+async function loadPrivacyPreferences(userId: string): Promise<void> {
+  try {
+    const { data, error } = await supabase
+      .from('privacy_preferences')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+    
+    if (!error && data) {
+      setRequestPrivacyMode(!!data.privacy_mode);
+      setRequestPrivacyPreferences(data);
+    } else {
+      setRequestPrivacyMode(false);
+      setRequestPrivacyPreferences(null);
+    }
+  } catch (err) {
+    logger.warn(`Failed to load privacy preferences for user ${userId}: ${err instanceof Error ? err.message : String(err)}`);
+    setRequestPrivacyMode(false);
+    setRequestPrivacyPreferences(null);
+  }
+}
 import { roleService } from '../services/role-service';
 
 export type UserRole = 'owner' | 'admin' | 'member' | 'viewer';
@@ -93,6 +115,7 @@ async function authenticateWithApiKey(
   };
 
   setRequestUserId(keyRecord.user_id);
+  await loadPrivacyPreferences(keyRecord.user_id);
   next();
   return true;
 }
@@ -154,6 +177,7 @@ export async function authenticate(
       scopes: Array.from(API_KEY_SCOPES),
     };
     setRequestUserId(user.id);
+    await loadPrivacyPreferences(user.id);
     Sentry.setUser({ id: user.id, email: user.email });
 
 
@@ -205,6 +229,7 @@ export async function optionalAuthenticate(
           scopes: Array.from(API_KEY_SCOPES),
         };
         setRequestUserId(user.id);
+        await loadPrivacyPreferences(user.id);
         Sentry.setUser({ id: user.id, email: user.email });
       }
 

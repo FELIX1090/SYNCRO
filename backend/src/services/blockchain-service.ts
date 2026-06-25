@@ -1,6 +1,7 @@
 import logger from "../config/logger";
 import { supabase } from "../config/database";
 import { NotificationPayload } from "../types/reminder";
+import crypto from 'crypto';
 import {
   Contract,
   Keypair,
@@ -146,7 +147,26 @@ export class BlockchainService {
       // If contract address is configured, attempt to write to blockchain
       if (this.contractAddress) {
         try {
-          const result = await this.writeToBlockchain(eventData);
+          const { privacyService } = require('./privacy-service');
+          const useCommitments = await privacyService.isPrivacyFeatureEnabled(userId, 'PRIVACY_AUDIT_COMMITMENTS');
+
+          let result;
+          if (useCommitments) {
+            const userCommitment = this.computePedersenCommitment(userId, userId);
+            const eventCommitment = this.computePedersenCommitment(JSON.stringify(eventData), userId);
+            const coarsenedTime = this.getCoarsenedTimestamp(eventData.timestamp);
+            
+            result = await this.invokeContractWithRetry(
+              "log_commitment",
+              [
+                xdr.ScVal.scvBytes(userCommitment),
+                xdr.ScVal.scvBytes(eventCommitment),
+                xdr.ScVal.scvU64(xdr.Uint64.fromString(String(coarsenedTime))),
+              ]
+            );
+          } else {
+            result = await this.writeToBlockchain(eventData);
+          }
 
           // Update database log with transaction hash
           if (result.transactionHash) {
@@ -286,10 +306,29 @@ export class BlockchainService {
       // If contract address is configured, attempt to write to blockchain
       if (this.contractAddress) {
         try {
-          const result = await this.writeSubscriptionToBlockchain(
-            operation,
-            eventData,
-          );
+          const { privacyService } = require('./privacy-service');
+          const useCommitments = await privacyService.isPrivacyFeatureEnabled(userId, 'PRIVACY_AUDIT_COMMITMENTS');
+
+          let result;
+          if (useCommitments) {
+            const userCommitment = this.computePedersenCommitment(userId, userId);
+            const eventCommitment = this.computePedersenCommitment(JSON.stringify(eventData), userId);
+            const coarsenedTime = this.getCoarsenedTimestamp(eventData.timestamp);
+
+            result = await this.invokeContractWithRetry(
+              "log_commitment",
+              [
+                xdr.ScVal.scvBytes(userCommitment),
+                xdr.ScVal.scvBytes(eventCommitment),
+                xdr.ScVal.scvU64(xdr.Uint64.fromString(String(coarsenedTime))),
+              ]
+            );
+          } else {
+            result = await this.writeSubscriptionToBlockchain(
+              operation,
+              eventData,
+            );
+          }
 
           // Update database log with transaction hash
           if (result.transactionHash) {
@@ -611,6 +650,144 @@ export class BlockchainService {
 
   private async sleep(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Helper to calculate a simulated Pedersen commitment (using SHA256 with blinding)
+  private computePedersenCommitment(data: string, userId: string): Buffer {
+    const systemSecret = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || 'system-secret';
+    const blinding = crypto.createHmac('sha256', systemSecret).update(userId).digest('hex');
+    return crypto.createHash('sha256').update(`${data}:${blinding}`).digest();
+  }
+
+  // Coarsen a timestamp to day-level (00:00:00 UTC) as unix epoch seconds
+  private getCoarsenedTimestamp(isoString: string): number {
+    const date = new Date(isoString);
+    date.setUTCHours(0, 0, 0, 0);
+    return Math.floor(date.getTime() / 1000);
+  }
+
+  /**
+   * Write encrypted subscription blob to blockchain
+   */
+  async storeEncryptedSubscription(
+    userId: string,
+    subscriptionId: string,
+    encryptedBlob: string,
+  ): Promise<{ success: boolean; transactionHash?: string; error?: string }> {
+    try {
+      const { data: dbLog, error: dbError } = await supabase
+        .from("blockchain_logs")
+        .insert({
+          user_id: userId,
+          event_type: "subscription_encrypted_store",
+          event_data: { subscriptionId, encryptedBlob, timestamp: new Date().toISOString() },
+          status: "pending",
+        })
+        .select()
+        .single();
+
+      if (dbError) {
+        logger.error("Failed to log encrypted sub event to database:", dbError);
+        throw dbError;
+      }
+
+      if (this.contractAddress) {
+        try {
+          const result = await this.invokeContractWithRetry(
+            "store_encrypted_subscription",
+            [
+              xdr.ScVal.scvString(subscriptionId),
+              xdr.ScVal.scvString(encryptedBlob),
+            ]
+          );
+
+          if (result.transactionHash) {
+            await supabase
+              .from("blockchain_logs")
+              .update({
+                transaction_hash: result.transactionHash,
+                status: "confirmed",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", dbLog.id);
+          }
+
+          return { success: true, transactionHash: result.transactionHash };
+        } catch (blockchainError) {
+          const errorMessage = blockchainError instanceof Error ? blockchainError.message : String(blockchainError);
+          logger.error("Failed to write encrypted sub to blockchain:", errorMessage);
+
+          await supabase
+            .from("blockchain_logs")
+            .update({
+              status: "failed",
+              error_message: errorMessage,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", dbLog.id);
+
+          return { success: true, error: errorMessage };
+        }
+      }
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to store encrypted subscription:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  }
+
+  /**
+   * Read encrypted subscription blob from blockchain
+   */
+  async getEncryptedSubscription(
+    userId: string,
+    subscriptionId: string,
+  ): Promise<string> {
+    if (!this.contractAddress) {
+      throw new Error("SOROBAN_CONTRACT_ADDRESS not configured");
+    }
+
+    const rpc = new SorobanRpc.Server(this.rpcUrl);
+    const contract = new Contract(this.contractAddress);
+    
+    const secret = await secretProvider.getSecret("STELLAR_SECRET_KEY");
+    if (!secret) {
+      throw new Error("STELLAR_SECRET_KEY not configured");
+    }
+    const sourceKeypair = Keypair.fromSecret(secret);
+    const account = await rpc.getAccount(sourceKeypair.publicKey());
+    
+    const tx = new TransactionBuilder(account, {
+      fee: "100",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "get_encrypted_subscription",
+          xdr.ScVal.scvString(subscriptionId)
+        )
+      )
+      .setTimeout(30)
+      .build();
+
+    const sim = await rpc.simulateTransaction(tx);
+    if (SorobanRpc.Api.isSimulationError(sim)) {
+      throw new Error(`Simulation failed: ${sim.error}`);
+    }
+
+    if (sim.result && sim.result.retval) {
+      const val = sim.result.retval;
+      if (val.switch() === xdr.ScValType.scvString()) {
+        return val.str().toString();
+      }
+      if (val.switch() === xdr.ScValType.scvVoid()) {
+        return "";
+      }
+    }
+    
+    return "";
   }
 
   private previewArgs(args: xdr.ScVal[]): string {

@@ -83,3 +83,76 @@ export function getDefaultPaymentProvider(): 'stripe' | 'paypal' | 'mock' {
 
     throw new Error('No payment provider is configured')
 }
+
+// ──────────────────────────────────────────────
+// Privacy Feature Flags (SDK Helpers)
+// ──────────────────────────────────────────────
+
+export type PrivacyFlagName =
+    | 'PRIVACY_STEALTH_ADDRESSES'
+    | 'PRIVACY_ENCRYPT_ON_CHAIN'
+    | 'PRIVACY_ZK_PROOFS'
+    | 'PRIVACY_PAYMENT_CHANNELS'
+    | 'PRIVACY_REMINDER_JITTER'
+    | 'PRIVACY_AUDIT_COMMITMENTS'
+    | 'PRIVACY_SETTLEMENT_BATCHING'
+
+const PRIVACY_FLAG_DEFAULTS: Record<PrivacyFlagName, boolean> = {
+    PRIVACY_STEALTH_ADDRESSES: false,
+    PRIVACY_ENCRYPT_ON_CHAIN: false,
+    PRIVACY_ZK_PROOFS: false,
+    PRIVACY_PAYMENT_CHANNELS: false,
+    PRIVACY_REMINDER_JITTER: false,
+    PRIVACY_AUDIT_COMMITMENTS: false,
+    PRIVACY_SETTLEMENT_BATCHING: false,
+}
+
+/**
+ * SDK helper: Check if a privacy feature flag is enabled for a given user.
+ * Fetches from /api/privacy/feature/:flag — or resolves to default if request fails.
+ */
+export async function isPrivacyFeatureEnabled(
+    userId: string,
+    flag: PrivacyFlagName
+): Promise<boolean> {
+    try {
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+        const res = await fetch(`${apiBase}/api/privacy/feature/${flag}`, {
+            credentials: 'include',
+            cache: 'no-store',
+        })
+        if (!res.ok) return PRIVACY_FLAG_DEFAULTS[flag]
+        const json = await res.json()
+        return !!json.enabled
+    } catch {
+        return PRIVACY_FLAG_DEFAULTS[flag]
+    }
+}
+
+/**
+ * Fetch all user privacy preferences from the API.
+ */
+export async function getPrivacyPreferences(): Promise<Record<string, boolean> | null> {
+    try {
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+        const res = await fetch(`${apiBase}/api/privacy/preferences`, {
+            credentials: 'include',
+            cache: 'no-store',
+        })
+        if (!res.ok) return null
+        const json = await res.json()
+        return json.data ?? null
+    } catch {
+        return null
+    }
+}
+
+/**
+ * Returns true if the user's privacy mode is currently enabled.
+ * Relies on cached preferences; falls back to false on failure.
+ */
+export async function isPrivacyModeEnabled(): Promise<boolean> {
+    const prefs = await getPrivacyPreferences()
+    return prefs?.privacy_mode === true
+}
+

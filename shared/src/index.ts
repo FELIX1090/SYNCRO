@@ -25,3 +25,7 @@ export * from './analytics';
 
 // Common utilities
 export * from './common';
+
+// Privacy Feature Flags
+export * from './blockchain-flags';
+

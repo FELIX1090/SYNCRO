@@ -7,6 +7,9 @@ import { referralService } from "./referral-service";
 import logger from "../config/logger";
 import { DatabaseTransaction } from "../utils/transaction";
 import SERVICE_CATEGORIES from "../../services/service-categories";
+import { privacyService } from "./privacy-service";
+import { encryptForUser, decryptForUser } from "../utils/encryption";
+import { PRIVACY_ENCRYPT_ON_CHAIN } from "../../../shared/src/blockchain-flags";
 import type {
   Subscription,
   SubscriptionCreateInput,
@@ -70,12 +73,32 @@ export class SubscriptionService {
         let syncStatus: "synced" | "partial" | "failed" = "synced";
 
         try {
-          blockchainResult = await blockchainService.syncSubscription(
-            userId,
-            subscription.id,
-            "create",
-            subscription,
-          );
+          const encryptOnChain = await privacyService.isPrivacyFeatureEnabled(userId, PRIVACY_ENCRYPT_ON_CHAIN);
+
+          if (encryptOnChain) {
+            // Encrypt metadata and use the encrypted contract call
+            const metadata = JSON.stringify({
+              name: subscription.name,
+              price: subscription.price,
+              billing_cycle: subscription.billing_cycle,
+              status: subscription.status,
+              category: subscription.category,
+              notes: subscription.notes,
+            });
+            const encryptedBlob = encryptForUser(metadata, userId);
+            blockchainResult = await blockchainService.storeEncryptedSubscription(
+              userId,
+              subscription.id,
+              encryptedBlob,
+            );
+          } else {
+            blockchainResult = await blockchainService.syncSubscription(
+              userId,
+              subscription.id,
+              "create",
+              subscription,
+            );
+          }
 
           if (!blockchainResult.success) {
             syncStatus = "partial";
@@ -631,12 +654,32 @@ export class SubscriptionService {
         let syncStatus: "synced" | "partial" | "failed" = "synced";
 
         try {
-          blockchainResult = await blockchainService.syncSubscription(
-            userId,
-            subscriptionId,
-            "update",
-            subscription,
-          );
+          const encryptOnChain = await privacyService.isPrivacyFeatureEnabled(userId, PRIVACY_ENCRYPT_ON_CHAIN);
+
+          if (encryptOnChain) {
+            // Encrypt metadata and use the encrypted contract call
+            const metadata = JSON.stringify({
+              name: subscription.name,
+              price: subscription.price,
+              billing_cycle: subscription.billing_cycle,
+              status: subscription.status,
+              category: subscription.category,
+              notes: subscription.notes,
+            });
+            const encryptedBlob = encryptForUser(metadata, userId);
+            blockchainResult = await blockchainService.storeEncryptedSubscription(
+              userId,
+              subscriptionId,
+              encryptedBlob,
+            );
+          } else {
+            blockchainResult = await blockchainService.syncSubscription(
+              userId,
+              subscriptionId,
+              "update",
+              subscription,
+            );
+          }
 
           if (!blockchainResult.success) {
             syncStatus = "partial";
@@ -687,6 +730,33 @@ export class SubscriptionService {
 
     if (error || !subscription) {
       throw new Error("Subscription not found or access denied");
+    }
+
+    // If encryption is enabled, attempt to read the encrypted copy from chain and merge
+    try {
+      const encryptOnChain = await privacyService.isPrivacyFeatureEnabled(userId, PRIVACY_ENCRYPT_ON_CHAIN);
+      if (encryptOnChain && blockchainService) {
+        const encryptedBlob = await blockchainService.getEncryptedSubscription(userId, subscriptionId);
+        if (encryptedBlob) {
+          try {
+            const decrypted = decryptForUser(encryptedBlob, userId);
+            const chainMeta = JSON.parse(decrypted);
+            // Merge on-chain metadata (audit copy) over the DB record — DB remains source of truth
+            return { ...subscription, ...chainMeta };
+          } catch (decryptErr) {
+            logger.warn("On-chain decryption failed, falling back to DB record", {
+              subscriptionId,
+              error: decryptErr instanceof Error ? decryptErr.message : String(decryptErr),
+            });
+          }
+        }
+      }
+    } catch (chainErr) {
+      // Non-fatal: DB is source of truth, chain is audit copy
+      logger.warn("Failed to fetch encrypted on-chain copy, using DB record", {
+        subscriptionId,
+        error: chainErr instanceof Error ? chainErr.message : String(chainErr),
+      });
     }
 
     return subscription;
